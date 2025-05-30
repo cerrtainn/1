@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html>
+<head>
+	<meta charset="utf-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+	
+	<title>Дизайнерские постеры</title>
+
+	<script src="https://unpkg.com/vue@3"></script>
+	<script src="https://html2canvas.hertzen.com/dist/html2canvas.min.js"></script>
+
+	<style>
+	
+	body {	
+		font-family: sans-serif;
+		background: #f4f4f4;
+		padding: 20px;
+		color: #333;
+	}
+
+	h1 {
+		text-align: center;
+		margin-bottom: 20px;
+	}
+
+	#app {
+		max-width: 900px;
+		margin: 0 auto;
+	}
+
+	.controls {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 10px;
+		margin-bottom: 20px;
+	}
+
+	input, select, button {
+		padding: 10px;
+		font-size: 16px;
+		border-radius: 6px;
+		border: 1px solid #ccc;
+		flex: 1;
+	}
+
+	button {
+		background: blue;
+		color: white;
+		cursor: pointer;
+	}
+
+	button:hover {
+		background: darkblue;
+	}
+
+	.poster {
+		width: 100%;
+		height: 400px;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		border: 3px dashed #ccc;
+		border-radius: 8px;
+		position: relative;
+		background-size: cover;
+		background-position: center;
+		overflow: hidden;
+	}
+
+	.poster-text {
+		position: absolute;
+		padding: 20px;
+		word-break: break-word;
+		user-select: none;
+	}
+
+	.draggable {
+		position: absolute;
+		cursor: move;
+		user-select: none;
+	}
+
+	</style>
+
+</head>
+
+<body>
+    <div id="app">
+        <h1>Конструктор Постеров</h1>
+
+        <div class="controls">
+            <input type="text" placeholder="Введите текст" v-model="newText" />
+            
+            <input type="color" v-model="newColor" title="Цвет текста" />
+            <button @click="addText">Добавить текст</button>
+            <input type="file" @change="uploadImage" accept="image/*" />
+            <button @click="addImage">Добавить картинку</button>
+            <select v-model="canvasSize" @change="resizeCanvas">
+                <option value="horizontal">Горизонтальный</option>
+                <option value="vertical">Вертикальный</option>
+                <option value="poster">Плакат</option>
+            </select>
+            <input type="color" v-model="backgroundColor" title="Фон холста" />
+            <button @click="save">Скачать постер</button>
+        </div>
+
+        <div class="poster" id="poster" :style="{ backgroundColor: backgroundColor, ...canvasStyle }">
+            <div
+                v-for="(obj, index) in objects"
+                :key="index"
+                :class="['draggable', { selected: selectedObject == obj }]"
+                :style="getObjectStyle(obj)"
+                @mousedown="startDrag($event, obj)"
+                @click="selectObject(obj)"
+            >
+                <div v-if="obj.type === 'text'" contenteditable
+                    @input="e => obj.content = e.target.innerText"
+                    :style="{ fontSize: obj.fontSize + 'px', color: obj.color, opacity: obj.opacity, fontFamily: obj.font }">
+                    {{ obj.content }}
+                </div>
+                <div v-if="obj.type === 'image'">
+                    <img :src="obj.src" :style="{ width: obj.width + 'px', transform: 'rotate(' + obj.rotation + 'deg)', opacity: obj.opacity }">
+                </div>
+            </div>
+        </div>
+
+        <!-- Панель управления выбранным элементом -->
+        <div v-if="selectedObject" style="margin-top: 20px; padding: 10px; border: 1px solid #ccc; background: #fff;">
+            <h3>Настройки выбранного элемента</h3>
+            <div v-if="selectedObject.type === 'image'">
+                <label>Ширина:
+                    <input type="range" min="50" max="500" step="10" v-model="selectedObject.width">
+                </label>
+                <label>Поворот:
+                    <input type="range" min="-180" max="180" step="1" v-model="selectedObject.rotation">
+                </label>
+                <label>Прозрачность:
+                    <input type="range" min="0" max="1" step="0.1" v-model="selectedObject.opacity">
+                </label>
+            </div>
+            <div v-if="selectedObject.type === 'text'">
+                <label>Размер шрифта:
+                    <input type="range" min="10" max="100" step="1" v-model="selectedObject.fontSize">
+                </label>
+                <label>Прозрачность:
+                    <input type="range" min="0" max="1" step="0.1" v-model="selectedObject.opacity">
+                </label>
+            </div>
+            <button @click="removeSelectedObject" style="margin-top:10px; background:red; color:#fff; border:none; padding:10px; border-radius:6px;">Удалить выбранное</button>
+        </div>
+    </div>
+
+    <script>
+        const app = Vue.createApp({
+            data() {
+                return {
+                    newText: '',
+                    newFont: 'Arial',
+                    newColor: '#000000',
+                    newSize: 24,
+                    newOpacity: 1,
+                    backgroundColor: '#ffffff',
+                    uploadedImage: null,
+                    objects: [],
+                    dragging: null,
+                    offset: { x: 0, y: 0 },
+                    canvasSize: 'horizontal',
+                    canvasStyle: { width: '900px', height: '500px' },
+                    selectedObject: null,
+                };
+            },
+            methods: {
+                addText() {
+                    const textObj = {
+                        type: 'text',
+                        content: this.newText || 'Текст',
+                        x: 50,
+                        y: 50,
+                        fontSize: this.newSize,
+                        color: this.newColor,
+                        opacity: this.newOpacity,
+                        font: this.newFont
+                    };
+                    this.objects.push(textObj);
+                    this.selectedObject = textObj;
+                    this.newText = '';
+                },
+                uploadImage(e) {
+                    const file = e.target.files[0];
+                    if (file) this.uploadedImage = URL.createObjectURL(file);
+                },
+                addImage() {
+                    if (this.uploadedImage) {
+                        const imageObj = {
+                            type: 'image',
+                            src: this.uploadedImage,
+                            x: 100,
+                            y: 100,
+                            width: 150,
+                            rotation: 0,
+                            opacity: 1
+                        };
+                        this.objects.push(imageObj);
+                        this.selectedObject = imageObj;
+                        this.uploadedImage = null;
+                    }
+                },
+                selectObject(obj) {
+                    this.selectedObject = obj;
+                },
+                removeSelectedObject() {
+                    const index = this.objects.indexOf(this.selectedObject);
+                    if (index !== -1) this.objects.splice(index, 1);
+                    this.selectedObject = null;
+                },
+                getObjectStyle(obj) {
+                    return {
+                        top: obj.y + 'px',
+                        left: obj.x + 'px',
+                        transform: obj.rotation ? `rotate(${obj.rotation}deg)` : 'none',
+                        opacity: obj.opacity
+                    };
+                },
+                startDrag(e, obj) {
+                    this.dragging = obj;
+                    this.selectedObject = obj;
+                    this.offset.x = e.offsetX;
+                    this.offset.y = e.offsetY;
+                    document.addEventListener('mousemove', this.onDrag);
+                    document.addEventListener('mouseup', this.stopDrag);
+                },
+                onDrag(e) {
+                    if (this.dragging) {
+                        const posterRect = document.getElementById('poster').getBoundingClientRect();
+                        this.dragging.x = e.clientX - this.offset.x - posterRect.left;
+                        this.dragging.y = e.clientY - this.offset.y - posterRect.top;
+                    }
+                },
+                stopDrag() {
+                    this.dragging = null;
+                    document.removeEventListener('mousemove', this.onDrag);
+                    document.removeEventListener('mouseup', this.stopDrag);
+                },
+                resizeCanvas() {
+                    const sizes = {
+                        horizontal: ['900px', '500px'],
+                        vertical: ['500px', '900px'],
+                        poster: ['600px', '1000px']
+                    };
+                    const [w, h] = sizes[this.canvasSize];
+                    this.canvasStyle.width = w;
+                    this.canvasStyle.height = h;
+                },
+                save() {
+                    html2canvas(document.getElementById('poster')).then(canvas => {
+                        const link = document.createElement('a');
+                        link.download = 'poster.png';
+                        link.href = canvas.toDataURL();
+                        link.click();
+                    });
+                }
+            }
+        });
+        app.mount('#app');
+    </script>
+</body>
+</html>
